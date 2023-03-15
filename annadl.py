@@ -1,0 +1,133 @@
+#! /usr/bin/env python3
+import time
+import os
+import logging
+import sys
+import argparse
+import json
+from pathlib import Path
+
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.common.exceptions import NoSuchElementException
+from selenium.webdriver.chrome.service import Service as ChromeService
+from webdriver_manager.chrome import ChromeDriverManager
+
+# Default download path -> ./assets/{book}
+C_DIR = os.path.dirname(os.path.realpath(__file__))
+DL_PATH = os.path.dirname(os.path.realpath(__file__)) + '/assets/'
+
+if Path(f'{C_DIR}/config.json').is_file():
+    # Read config file to determine if path is set
+    with open(f'{C_DIR}/config.json', 'r') as f:
+        config = json.load(f)
+         
+        if config['download_path'] and config['download_path'] != '':
+             DL_PATH = config['download_path'].strip()
+
+# Detect download status & time
+def dlwait(path):
+    ''' Wait until the file download is completed. Will not work if a corrupted download is already 
+    in the given path. If the function starts before the download, it won't wait for its completion.'''
+    start_time = time.time()
+    dl_wait = True
+    
+    while dl_wait:
+        time.sleep(1) # Precision
+        dl_wait = False
+         
+        for book in os.listdir(path):
+            if book.endswith('.crdownload'):
+                dl_wait = True
+     
+    runtime = "%s" % round(time.time() - start_time, 4)
+    return runtime
+
+# Argparse initialization & parameters
+parser = argparse.ArgumentParser()
+
+parser.add_argument('path', metavar='path', type=str, default=DL_PATH, action='store',
+                    nargs='?', help='A path for the download')
+
+parser.add_argument('--s', metavar='search', type=str, action='store',
+                    required=True, help='A search query for the download')
+
+parser.add_argument('--n', metavar='quantity', type=int, default=5, 
+                    help='Number of search results desired')
+
+args = parser.parse_args()
+
+# Disable unsightly webdriver-manager log messages
+os.environ['WDM_LOG_LEVEL'] = '0'
+os.environ['WDM_LOG'] = str(logging.NOTSET)
+logging.getLogger('WDM').setLevel(logging.NOTSET)
+
+chrome_options = Options()
+
+# Include this to remove GUI and extensions for the sake of simplicity
+chrome_options.add_argument("--headless")
+chrome_options.add_argument("--disable-extensions")
+
+# Necessary variables
+driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=chrome_options)
+
+DL_PATH = args.path
+search = args.s
+result_count = args.n
+
+# Enable downloads in selenium
+driver.command_executor._commands["send_command"] = ("POST", '/session/$sessionId/chromium/send_command')
+
+params = {'cmd': 'Page.setDownloadBehavior', 'params': {'behavior': 'allow', 'downloadPath': DL_PATH}}
+command_result = driver.execute("send_command", params)
+
+# Array containing search results
+sresults = []
+
+# Search query and begin download
+start_url = f"https://annas-archive.org/search?q={search}"
+driver.get(start_url)
+
+# Webelement objects of links
+book_links = driver.find_elements(By.XPATH, '//a[contains(@href,"/md5/")]')
+
+# add links to the array of search results
+for n in range(result_count):
+    href = str(book_links[n].get_attribute('href'))
+    sresults.append(href)
+
+# Obtain book info
+for i in range(len(sresults)):
+    book_info = driver.find_element(By.ID, f'link-index-{i}').text
+    book_info = book_info.split('\n')
+
+    # info message
+    print(f"\n[{i+1}]")
+    for info in book_info:
+        print("\t", info)
+
+book_selection = int(input("\nEnter desired download: "))
+
+driver.get(sresults[book_selection-1])
+
+# Find libgen link
+libgen_link = driver.find_element(By.XPATH, "//a[@class='js-download-link' and contains(@href, 'libgen') and text()='Libgen.li']").get_attribute('href')
+
+# Open downlod link on libgen
+driver.get(libgen_link)
+
+driver.find_element(By.XPATH, "//a[contains(@href, 'get.php')]").click()
+
+print(f"Downloading.. ")
+dl_time = dlwait(DL_PATH)
+
+print(f'Successfully downloaded. ({dl_time} seconds)')
+
+driver.quit()
+
+# TODO:
+# - organize book_info
+# - organize and support other download options
+# - fix "downloading..." and instead use "downloading {name}"
+# - ensure xpath methods are correct
