@@ -1,12 +1,12 @@
 # anna-dl
-Python tool allowing easy books downloads from the terminal 
+Python tool allowing easy books downloads from the terminal
 
-replacement for [zlib-dl](https://github.com/Nquxii/zlib-dl)
+Replacement for [zlib-dl](https://github.com/Nquxii/zlib-dl)
 
 <img src="images/demo-f.gif" align="center">
 
 ## Features 
-- Bypass anna-archive's randomly generated links to downloads
+- Bypass randomly generated links to downloads
 - Obtain a specified number of results
 - Retrieve metadata without having to go onto annas-archive.org itself
 
@@ -17,7 +17,7 @@ git clone https://github.com/Nquxii/anna-dl
 cd anna-dl
 ```
 ```
-pip3 install -r requirements.txt
+pip3 install -r requirements.in
 ```
 
 Open help section
@@ -40,7 +40,7 @@ Number of results defaults to 5 of the top results available. Use 0 to see all s
 
 
 If a path in the command is specified, it will be used. Otherwise, the download_path in config.json will be used.
-If none of these options are available, the program will use `assets/` as its download folder.
+If none of these options are available, the program will use `./assets/` as its download folder.
 
 ### Example
 View 5 search results for "The Pragmatic Programmer". Download the resulting file in /home/johndoe/Documents/books
@@ -51,9 +51,4 @@ python3 annadl /home/johndoe/Documents/books --s "The Pragmatic Programmer"
 View **all** search results on the first page for "Don Quixote". Download the resulting file in ./assets/ (assuming no set path in config.json)
 ```
 python3 annadl --s "Don Quixote" --n 0
-```
-
-View 3 pages of **all** search results for "Deep Work". Download the resulting file in ./assets/ (assuming no set path in config.json)
-```
-python3 annadl --s "Deep Work" --n 0 --p 3
 ```
