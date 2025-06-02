@@ -138,7 +138,7 @@ driver.get(sresults[book_selection-1])
 
 # click "show external downloads"
 
-show_link = driver.find_element(By.XPATH, "/html/body/main/div[3]/div[4]/div[1]/a").click()
+show_link = driver.find_element(By.XPATH, "/html/body/main/div[3]/div[3]/a").click()
 
 page_text = driver.find_element(By.XPATH, "/html/body/main").text
 
