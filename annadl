@@ -102,33 +102,35 @@ for n in range(result_count):
     sresults.append(href)
 
 # Obtain book info
-book_elements = driver.find_elements(By.XPATH, "//div[contains(@class, 'h-[125]')]//a[contains(@class, 'js-vim-focus')]")[:result_count]
+book_elements = driver.find_elements(By.XPATH, "//div[contains(@class, 'h-[110px]')]//a[contains(@class, 'js-vim-focus')]")[:result_count]
 
 # loop through each search element
 for i, book_element in enumerate(book_elements):
+    import re
     # Extract specific info
-    specific_info = book_element.find_element(By.XPATH, "/html/body/main/form/div[4]/div[2]/div[2]/div[1]/a/div[2]").text
-    specific_info_parts = specific_info.split(", ")
-    
+    specific_info = book_element.find_element(By.XPATH, ".//div[contains(@class, 'grow')]/div[1]").text
+    specific_info_parts = [part.strip() for part in specific_info.split(", ")]
+
     # Extract number and title
     title = book_element.find_element(By.CSS_SELECTOR, "h3").text
-    
+
     # Extract author
     author = book_element.find_element(By.CSS_SELECTOR, "div.italic").text
-    
+
     # Extract publisher
     publisher = book_element.find_element(By.CSS_SELECTOR, "div.truncate").text
-    
+
     # Extract language and file type
-    language = specific_info_parts[0]
-    file_type_size = specific_info_parts[1] + ", " + specific_info_parts[3] if len(specific_info_parts) > 3 else specific_info_parts[1]
-    
+    languages = [p for p in specific_info_parts if re.match(r'.+\s\[[a-z]{2}\]', p)]
+    file_type = next((p for p in specific_info_parts if p.startswith(".")), None)
+    file_size = next((p for p in specific_info_parts if re.match(r'\d+(\.\d+)?MB', p)), None)
+
     # Print book information
     print(f"\n[{i+1}] {title}")
     print("\t", author)
     print("\t", publisher)
-    print("\t", language)
-    print("\t", file_type_size)
+    print("\t", " ".join(languages))
+    print("\t", file_type, file_size)
 
 
 
@@ -138,7 +140,7 @@ driver.get(sresults[book_selection-1])
 
 # click "show external downloads"
 
-show_link = driver.find_element(By.XPATH, "/html/body/main/div[3]/div[4]/div[1]/a").click()
+show_link = driver.find_element(By.XPATH, "/html/body/main/div[3]/div[3]/a").click()
 
 page_text = driver.find_element(By.XPATH, "/html/body/main").text
 
