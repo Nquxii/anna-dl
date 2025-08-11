@@ -66,7 +66,7 @@ logging.getLogger('WDM').setLevel(logging.NOTSET)
 chrome_options = Options()
 
 # Include this to remove GUI and extensions for the sake of simplicity
-#chrome_options.add_argument("--headless")
+chrome_options.add_argument("--headless")
 chrome_options.add_argument("--disable-extensions")
 chrome_options.add_argument("--no-sandbox")
 chrome_options.add_argument("--disable-dev-shm-usage")
