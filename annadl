@@ -66,15 +66,75 @@ logging.getLogger('WDM').setLevel(logging.NOTSET)
 chrome_options = Options()
 
 # Include this to remove GUI and extensions for the sake of simplicity
-chrome_options.add_argument("--headless")
+#chrome_options.add_argument("--headless")
 chrome_options.add_argument("--disable-extensions")
+chrome_options.add_argument("--no-sandbox")
+chrome_options.add_argument("--disable-dev-shm-usage")
+chrome_options.add_argument("--disable-logging")
+chrome_options.add_argument("--log-level=3")
+chrome_options.add_argument("--silent")
+chrome_options.add_experimental_option('excludeSwitches', ['enable-logging'])
+chrome_options.add_experimental_option('useAutomationExtension', False)
 
-# Necessary variables
-driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=chrome_options)
+# Try to get chromedriver path and find the actual executable
+try:
+    # Get the chromedriver path
+    driver_path = ChromeDriverManager().install()
+    
+    # Fix for the incorrect path issue - find the actual chromedriver executable
+    if 'THIRD_PARTY_NOTICES' in driver_path or not driver_path.endswith('chromedriver'):
+        # Get the directory containing the chromedriver
+        driver_dir = os.path.dirname(driver_path)
+        
+        # Look for the actual chromedriver executable
+        for file in os.listdir(driver_dir):
+            if file == 'chromedriver' or (file.startswith('chromedriver') and not file.endswith('.txt')):
+                actual_driver_path = os.path.join(driver_dir, file)
+                # Make sure it's executable
+                os.chmod(actual_driver_path, 0o755)
+                driver_path = actual_driver_path
+                break
+        
+        # If we still can't find it, look one level up (sometimes it's in a subdirectory)
+        if 'THIRD_PARTY_NOTICES' in driver_path:
+            parent_dir = os.path.dirname(driver_dir)
+            for root, dirs, files in os.walk(parent_dir):
+                for file in files:
+                    if file == 'chromedriver':
+                        actual_driver_path = os.path.join(root, file)
+                        os.chmod(actual_driver_path, 0o755)
+                        driver_path = actual_driver_path
+                        break
+                if file == 'chromedriver':
+                    break
+    
+    driver = webdriver.Chrome(service=ChromeService(driver_path), options=chrome_options)
+    
+except Exception as e:
+    print(f"Error with ChromeDriverManager: {e}")
+    print("Trying alternative approach...")
+    
+    # Use system chromedriver if available
+    try:
+        # Try to use system chromedriver (if installed via homebrew or manually)
+        driver = webdriver.Chrome(options=chrome_options)
+    except Exception as e2:
+        print(f"System chromedriver also failed: {e2}")
+        print("\nPlease try one of these solutions:")
+        print("1. Install chromedriver manually:")
+        print("   brew install chromedriver (on macOS)")
+        print("   or download from https://chromedriver.chromium.org/")
+        print("2. Clear the webdriver cache:")
+        print("   rm -rf ~/.wdm/")
+        print("3. Update your Chrome browser to the latest version")
+        sys.exit(1)
 
 DL_PATH = args.path
 search = args.s
 result_count = args.n
+
+# Ensure download directory exists
+os.makedirs(DL_PATH, exist_ok=True)
 
 # Enable downloads in selenium
 driver.command_executor._commands["send_command"] = ("POST", '/session/$sessionId/chromium/send_command')
@@ -92,12 +152,17 @@ driver.get(start_url)
 # scroll to the bottom of the page so that every element I search for is returned.
 driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
 
-# Webelement objects of links
-book_links = driver.find_elements(By.XPATH, '//a[contains(@href,"/md5/")]')
+# Webelement objects of links to books (search result)
+book_links = driver.find_elements(By.CSS_SELECTOR, 'a[href*="/md5/"][class*="js-vim-focus"]')
+
+
+# Check if we have enough results
+if len(book_links) < result_count:
+    result_count = len(book_links)
+    print(f"Only {result_count} results found")
 
 # add links to the array of search results
 for n in range(result_count):
-    print(n)
     href = str(book_links[n].get_attribute('href'))
     sresults.append(href)
 
@@ -108,83 +173,93 @@ book_elements = driver.find_elements(By.XPATH, "//div[contains(@class, 'h-[110px
 for i, book_element in enumerate(book_elements):
     import re
     # Extract specific info
-    specific_info = book_element.find_element(By.XPATH, ".//div[contains(@class, 'grow')]/div[1]").text
-    specific_info_parts = [part.strip() for part in specific_info.split(", ")]
+    try:
+        specific_info = book_element.find_element(By.XPATH, ".//div[contains(@class, 'grow')]/div[1]").text
+        specific_info_parts = [part.strip() for part in specific_info.split(", ")]
 
-    # Extract number and title
-    title = book_element.find_element(By.CSS_SELECTOR, "h3").text
+        # Extract number and title
+        title = book_element.find_element(By.CSS_SELECTOR, "h3").text
 
-    # Extract author
-    author = book_element.find_element(By.CSS_SELECTOR, "div.italic").text
+        # Extract author
+        author = book_element.find_element(By.CSS_SELECTOR, "div.italic").text
 
-    # Extract publisher
-    publisher = book_element.find_element(By.CSS_SELECTOR, "div.truncate").text
+        # Extract publisher
+        publisher = book_element.find_element(By.CSS_SELECTOR, "div.truncate").text
 
-    # Extract language and file type
-    languages = [p for p in specific_info_parts if re.match(r'.+\s\[[a-z]{2}\]', p)]
-    file_type = next((p for p in specific_info_parts if p.startswith(".")), None)
-    file_size = next((p for p in specific_info_parts if re.match(r'\d+(\.\d+)?MB', p)), None)
+        # Extract language and file type
+        languages = [p for p in specific_info_parts if re.match(r'.+\s\[[a-z]{2}\]', p)]
+        file_type = next((p for p in specific_info_parts if p.startswith(".")), None)
+        file_size = next((p for p in specific_info_parts if re.match(r'\d+(\.\d+)?MB', p)), None)
 
-    # Print book information
-    print(f"\n[{i+1}] {title}")
-    print("\t", author)
-    print("\t", publisher)
-    print("\t", " ".join(languages))
-    print("\t", file_type, file_size)
+        # Print book information
+        print(f"\n[{i+1}] {title}")
+        print("\t", author)
+        print("\t", publisher)
+        print("\t", " ".join(languages))
+        print("\t", file_type, file_size)
+    except Exception as e:
+        print(f"\n[{i+1}] Error extracting info: {e}")
 
+try:
+    book_selection = int(input("\nEnter desired download: "))
+    
+    if book_selection < 1 or book_selection > len(sresults):
+        print("Invalid selection")
+        driver.quit()
+        sys.exit(1)
 
+    driver.get(sresults[book_selection-1])
 
-book_selection = int(input("\nEnter desired download: "))
+    # click "show external downloads"
+    show_link = driver.find_element(By.XPATH, "//a[contains(text(), 'show external downloads')]")
+    show_link.click()
 
-driver.get(sresults[book_selection-1])
+    page_text = driver.find_element(By.XPATH, "/html/body/main").text
 
-# click "show external downloads"
+    if 'libgen' in page_text:
+        libgen_link = driver.find_element(By.XPATH, "//a[@class='js-download-link' and contains(@href, 'libgen') and text()='Libgen.li']").get_attribute('href')
 
-show_link = driver.find_element(By.XPATH, "/html/body/main/div[3]/div[3]/a").click()
-
-page_text = driver.find_element(By.XPATH, "/html/body/main").text
-
-if 'libgen' in page_text:
-    libgen_link = driver.find_element(By.XPATH, "//a[@class='js-download-link' and contains(@href, 'libgen') and text()='Libgen.li']").get_attribute('href')
-
-    # Open downlod link on libgen
-    driver.get(libgen_link)
-    driver.find_element(By.XPATH, "//a[contains(@href, 'get.php')]").click()
-
-    print(f"Downloading ...")
-
-    dl_time = dlwait(DL_PATH)
-
-    print(f'Successfully downloaded. ({dl_time} seconds)')
-else:
-    print("ERROR: libgen.is link not found.")
-    print("The following links require human verification.")
-    time.sleep(2)
-
-    # Find all <li> elements within the <ul> with the class 'mb-4'
-    list_items = driver.find_elements(By.CSS_SELECTOR, 'ul.mb-4 li')
-
-    # Iterate through the list items and extract the information
-    for i, item in enumerate(list_items, start=1):
-        option_text = item.text
-        try:
-            link_element = item.find_element(By.CSS_SELECTOR, 'a.js-download-link')
-            link_text = link_element.text
-            link_href = link_element.get_attribute('href')
-
-            # Print the extracted information
-            print(f"\nOption {i}:")
-            print(f"\tOption Text: {option_text}")
-            print(f"\tLink Text: {link_text}")
-            print(f"\tLink Href: {link_href}")
-
-        except NoSuchElementException:
-            print(f"\nOption {i}:")
-            print(f"\tOption Text: {option_text}")
-            print("\tNo download link found.")
+        # Open download link on libgen
+        driver.get(libgen_link)
+        driver.execute_script("document.querySelector('a[href*=\"get.php\"]').click();")
 
 
-driver.quit()
+        print(f"Downloading ...")
 
-# TODO:
-# - refactor code as libgen's UI changes
+        dl_time = dlwait(DL_PATH)
+
+        print(f'Successfully downloaded. ({dl_time} seconds)')
+    else:
+        print("ERROR: libgen.is link not found.")
+        print("The following links require human verification.")
+        time.sleep(2)
+
+        # Find all <li> elements within the <ul> with the class 'mb-4'
+        list_items = driver.find_elements(By.CSS_SELECTOR, 'ul.mb-4 li')
+
+        # Iterate through the list items and extract the information
+        for i, item in enumerate(list_items, start=1):
+            option_text = item.text
+            try:
+                link_element = item.find_element(By.CSS_SELECTOR, 'a.js-download-link')
+                link_text = link_element.text
+                link_href = link_element.get_attribute('href')
+
+                # Print the extracted information
+                print(f"\nOption {i}:")
+                print(f"\tOption Text: {option_text}")
+                print(f"\tLink Text: {link_text}")
+                print(f"\tLink Href: {link_href}")
+
+            except NoSuchElementException:
+                print(f"\nOption {i}:")
+                #print(f"\tOption Text: {option_text}")
+                print("\tNo download link found.")
+        
+
+except KeyboardInterrupt:
+    print("\nScript interrupted by user")
+except Exception as e:
+    print(f"An error occurred: {e}")
+finally:
+    driver.quit()
