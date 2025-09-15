@@ -149,56 +149,135 @@ sresults = []
 start_url = f"https://annas-archive.org/search?q={search}"
 driver.get(start_url)
 
+# Wait for page to load
+time.sleep(2)
+
 # scroll to the bottom of the page so that every element I search for is returned.
 driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
 
-# Webelement objects of links to books (search result)
-book_links = driver.find_elements(By.CSS_SELECTOR, 'a[href*="/md5/"][class*="js-vim-focus"]')
+# Wait a bit more for dynamic content
+time.sleep(1)
 
+# Find book links using the correct selector from the HTML structure
+book_links = driver.find_elements(By.CSS_SELECTOR, 'a.js-vim-focus.custom-a')
+
+print(f"Found {len(book_links)} book links")
 
 # Check if we have enough results
 if len(book_links) < result_count:
     result_count = len(book_links)
     print(f"Only {result_count} results found")
 
+if result_count == 0:
+    print("No results found. Please check your search query.")
+    driver.quit()
+    sys.exit(1)
+
 # add links to the array of search results
 for n in range(result_count):
     href = str(book_links[n].get_attribute('href'))
     sresults.append(href)
 
-# Obtain book info
-book_elements = driver.find_elements(By.XPATH, "//div[contains(@class, 'h-[110px]')]//a[contains(@class, 'js-vim-focus')]")[:result_count]
-
-# loop through each search element
-for i, book_element in enumerate(book_elements):
-    import re
-    # Extract specific info
+# Loop through the book links and extract information directly
+for i in range(result_count):
     try:
-        specific_info = book_element.find_element(By.XPATH, ".//div[contains(@class, 'grow')]/div[1]").text
-        specific_info_parts = [part.strip() for part in specific_info.split(", ")]
-
-        # Extract number and title
-        title = book_element.find_element(By.CSS_SELECTOR, "h3").text
-
-        # Extract author
-        author = book_element.find_element(By.CSS_SELECTOR, "div.italic").text
-
-        # Extract publisher
-        publisher = book_element.find_element(By.CSS_SELECTOR, "div.truncate").text
-
-        # Extract language and file type
-        languages = [p for p in specific_info_parts if re.match(r'.+\s\[[a-z]{2}\]', p)]
-        file_type = next((p for p in specific_info_parts if p.startswith(".")), None)
-        file_size = next((p for p in specific_info_parts if re.match(r'\d+(\.\d+)?MB', p)), None)
-
-        # Print book information
+        # Get the book link element
+        book_link = book_links[i]
+        
+        # Extract title directly from the link text
+        title = book_link.text.strip()
+        
+        # Find the parent container for this book
+        # Navigate up to find the main container
+        container = book_link
+        try:
+            for _ in range(5):  # Try up to 5 parent levels
+                container = container.find_element(By.XPATH, "..")
+                classes = container.get_attribute('class') or ""
+                if 'flex' in classes and ('pt-3' in classes or 'border-b' in classes):
+                    break
+        except:
+            # If we can't find the container, use the book_link's immediate parent
+            container = book_link.find_element(By.XPATH, "../..")
+        
         print(f"\n[{i+1}] {title}")
-        print("\t", author)
-        print("\t", publisher)
-        print("\t", " ".join(languages))
-        print("\t", file_type, file_size)
+        
+        # Extract all text from the container for debugging
+        all_text = container.text
+        
+        # Extract author - look for any link that contains author info
+        author = "Unknown"
+        try:
+            # Look for links in the container that might be author links
+            all_links = container.find_elements(By.TAG_NAME, 'a')
+            for link in all_links:
+                href = link.get_attribute('href') or ""
+                text = link.text.strip()
+                # Skip the main title link and empty links
+                if href and 'search?q=' in href and text and text != title:
+                    # Check if this looks like an author (usually appears after title)
+                    if len(text.split(',')) <= 2 and len(text.split()) <= 4:  # Author names are usually short
+                        author = text
+                        break
+        except Exception as e:
+            print(f"\t  Error extracting author: {e}")
+        
+        print(f"\tAuthor: {author}")
+        
+        # Extract year/publisher from text
+        publisher = "Unknown"
+        try:
+            import re
+            # Look for 4-digit year
+            year_match = re.search(r'\b(19|20)\d{2}\b', all_text)
+            if year_match:
+                publisher = year_match.group(0)
+        except Exception as e:
+            print(f"\t  Error extracting year: {e}")
+            
+        print(f"\tYear: {publisher}")
+
+        # Extract metadata from text
+        language = "Unknown"
+        file_format = "Unknown" 
+        file_size = "Unknown"
+        
+        try:
+            import re
+            
+            # Extract language (pattern like "English [en]")
+            language_match = re.search(r'(\w+)\s+\[([a-z]{2})\]', all_text)
+            if language_match:
+                language = language_match.group(1)
+            
+            # Extract file format (like EPUB, PDF) - look for common formats
+            format_match = re.search(r'\b(EPUB|PDF|MOBI|AZW3|TXT|DOC|DOCX)\b', all_text, re.IGNORECASE)
+            if format_match:
+                file_format = format_match.group(1).upper()
+            
+            # Extract file size (like 0.3MB)
+            size_match = re.search(r'(\d+\.?\d*\s*[MKG]B)', all_text, re.IGNORECASE)
+            if size_match:
+                file_size = size_match.group(1)
+                
+        except Exception as e:
+            print(f"\t  Error extracting metadata: {e}")
+
+        print(f"\tLanguage: {language}")
+        print(f"\tFormat: {file_format}, Size: {file_size}")
+        
+        # Debug: print some of the raw text if needed
+        if i == 0:  # Print debug info for first result
+            print(f"\t  Debug - Container text preview: {all_text[:200]}...")
+        
     except Exception as e:
-        print(f"\n[{i+1}] Error extracting info: {e}")
+        print(f"\n[{i+1}] Error extracting info for book {i+1}: {e}")
+        # Print at least the title if we can get it
+        try:
+            title = book_links[i].text.strip()
+            print(f"\tTitle: {title}")
+        except:
+            print(f"\tCould not extract title")
 
 try:
     book_selection = int(input("\nEnter desired download: "))
@@ -209,53 +288,129 @@ try:
         sys.exit(1)
 
     driver.get(sresults[book_selection-1])
+    
+    # Wait for page to load
+    time.sleep(2)
 
-    # click "show external downloads"
-    show_link = driver.find_element(By.XPATH, "//a[contains(text(), 'show external downloads')]")
-    show_link.click()
+    # click "show external downloads" - try multiple possible selectors
+    try:
+        show_link = driver.find_element(By.XPATH, "//a[contains(text(), 'show external downloads')]")
+        show_link.click()
+    except NoSuchElementException:
+        try:
+            show_link = driver.find_element(By.XPATH, "//a[contains(text(), 'external downloads')]")
+            show_link.click()
+        except NoSuchElementException:
+            try:
+                show_link = driver.find_element(By.XPATH, "//button[contains(text(), 'show external downloads')]")
+                show_link.click()
+            except NoSuchElementException:
+                print("Could not find 'show external downloads' link. Looking for direct download links...")
 
-    page_text = driver.find_element(By.XPATH, "/html/body/main").text
+    # Wait for external downloads to load
+    time.sleep(2)
+
+    page_text = driver.find_element(By.XPATH, "/html/body").text.lower()
 
     if 'libgen' in page_text:
-        libgen_link = driver.find_element(By.XPATH, "//a[@class='js-download-link' and contains(@href, 'libgen') and text()='Libgen.li']").get_attribute('href')
+        try:
+            # Try multiple selectors for libgen link
+            libgen_link = None
+            
+            # Try different possible selectors
+            selectors = [
+                "//a[@class='js-download-link' and contains(@href, 'libgen') and text()='Libgen.li']",
+                "//a[contains(@href, 'libgen') and contains(@class, 'download')]",
+                "//a[contains(text(), 'Libgen') and contains(@href, 'libgen')]",
+                "//a[contains(@href, 'libgen')]"
+            ]
+            
+            for selector in selectors:
+                try:
+                    element = driver.find_element(By.XPATH, selector)
+                    libgen_link = element.get_attribute('href')
+                    break
+                except NoSuchElementException:
+                    continue
+            
+            if not libgen_link:
+                print("Could not find libgen download link")
+                raise NoSuchElementException("Libgen link not found")
 
-        # Open download link on libgen
-        driver.get(libgen_link)
-        driver.execute_script("document.querySelector('a[href*=\"get.php\"]').click();")
+            # Open download link on libgen
+            driver.get(libgen_link)
+            time.sleep(3)
+            
+            # Look for download link on libgen page
+            try:
+                driver.execute_script("document.querySelector('a[href*=\"get.php\"]').click();")
+            except:
+                # Try alternative selectors
+                download_selectors = [
+                    "//a[contains(@href, 'get.php')]",
+                    "//a[contains(text(), 'GET')]",
+                    "//a[contains(@href, 'download')]"
+                ]
+                
+                for selector in download_selectors:
+                    try:
+                        download_link = driver.find_element(By.XPATH, selector)
+                        download_link.click()
+                        break
+                    except NoSuchElementException:
+                        continue
 
+            print(f"Downloading ...")
 
-        print(f"Downloading ...")
+            dl_time = dlwait(DL_PATH)
 
-        dl_time = dlwait(DL_PATH)
-
-        print(f'Successfully downloaded. ({dl_time} seconds)')
-    else:
-        print("ERROR: libgen.is link not found.")
+            print(f'Successfully downloaded. ({dl_time} seconds)')
+            
+        except Exception as e:
+            print(f"Error with libgen download: {e}")
+            print("Falling back to manual link selection...")
+    
+    if 'libgen' not in page_text or 'Error with libgen download:' in str(locals()):
+        print("ERROR: libgen.li link not found or failed.")
         print("The following links require human verification.")
         time.sleep(2)
 
-        # Find all <li> elements within the <ul> with the class 'mb-4'
-        list_items = driver.find_elements(By.CSS_SELECTOR, 'ul.mb-4 li')
+        # Find all download links
+        try:
+            # Try to find download links in various formats
+            download_elements = driver.find_elements(By.CSS_SELECTOR, 'a.js-download-link')
+            
+            if not download_elements:
+                download_elements = driver.find_elements(By.CSS_SELECTOR, 'a[href*="download"]')
+            
+            if not download_elements:
+                download_elements = driver.find_elements(By.XPATH, "//a[contains(@href, 'http') and (contains(@href, 'libgen') or contains(@href, 'download') or contains(@href, 'mirror'))]")
 
-        # Iterate through the list items and extract the information
-        for i, item in enumerate(list_items, start=1):
-            option_text = item.text
-            try:
-                link_element = item.find_element(By.CSS_SELECTOR, 'a.js-download-link')
-                link_text = link_element.text
-                link_href = link_element.get_attribute('href')
+            # Iterate through the download options
+            for i, element in enumerate(download_elements, start=1):
+                try:
+                    link_text = element.text.strip()
+                    link_href = element.get_attribute('href')
+                    
+                    # Get parent element text for context
+                    parent_text = ""
+                    try:
+                        parent_text = element.find_element(By.XPATH, "..").text.strip()
+                    except:
+                        pass
 
-                # Print the extracted information
-                print(f"\nOption {i}:")
-                print(f"\tOption Text: {option_text}")
-                print(f"\tLink Text: {link_text}")
-                print(f"\tLink Href: {link_href}")
+                    # Print the extracted information
+                    print(f"\nOption {i}:")
+                    print(f"\tLink Text: {link_text}")
+                    print(f"\tLink Href: {link_href}")
+                    if parent_text and parent_text != link_text:
+                        print(f"\tContext: {parent_text}")
 
-            except NoSuchElementException:
-                print(f"\nOption {i}:")
-                #print(f"\tOption Text: {option_text}")
-                print("\tNo download link found.")
-        
+                except Exception as e:
+                    print(f"\nOption {i}: Error extracting link info - {e}")
+                    
+        except Exception as e:
+            print(f"Could not find download links: {e}")
 
 except KeyboardInterrupt:
     print("\nScript interrupted by user")
